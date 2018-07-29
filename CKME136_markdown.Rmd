@@ -1,0 +1,354 @@
+---
+title: "CKME136_Final"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r import_data}
+#load required packages
+library(FSelector)
+library(glmulti)
+library(polycor)
+library(VIM)
+library(mice)
+library(plyr)
+library(InformationValue)
+library(caret)
+library(tree)
+library(randomForest)
+library(class)
+library(gmodels)
+library(ROCR)
+library(car)
+library(rpart)
+library(rpart.plot)
+library(e1071)
+
+memory.limit(10000)
+
+#read in the  raw data
+NCDB_raw <- read.csv("C:/Users/patri/OneDrive/Documents/R/CKME136/ncdb_2015.csv")
+
+#View the dataset
+str(NCDB_raw)
+head(NCDB_raw)
+
+```
+
+
+```{r variables}
+
+#rename missing values in dataset to NA
+mv <- paste(c( "X", "XX", "XXX" , "XXXX",  "U" , "UU" , "UUU" , "UUUU", "N" , "NN" , "NNN", "NNNN" , "Q" , "QQ" , "QQQ" , "QQQQ"), collapse = "|")
+NCDB_raw <- sapply( NCDB_raw, FUN = function(x) (gsub(mv, NA, x)))
+NCDB_raw <- as.data.frame(NCDB_raw)
+
+#Alias Sex variable: Change Sex to F:0 , M: 1
+NCDB_raw$P_SEX <- gsub("F" , 0 , NCDB_raw$P_SEX)
+NCDB_raw$P_SEX <- gsub("M" , 1 , NCDB_raw$P_SEX)
+NCDB_raw$P_SEX <- as.factor(NCDB_raw$P_SEX)
+
+
+#Change number of vehicles involved to a numeric value
+NCDB_raw$C_VEHS <- as.integer(as.character(NCDB_raw$C_VEHS))
+
+#change vehicle year to a numeric value
+NCDB_raw$V_YEAR <- (as.integer(as.character(NCDB_raw$V_YEAR)))
+
+#change person's age to a numeric value
+NCDB_raw$P_AGE <- as.integer(NCDB_raw$P_AGE)
+
+#convert P_ISEV (dependent variable) to unharmed / harmed: 0 - unharmed , 1 - harmed
+NCDB_raw$P_ISEV <- gsub(1 , 0 , NCDB_raw$P_ISEV) #unharmed
+NCDB_raw$P_ISEV <- gsub( 2 , 1 , NCDB_raw$P_ISEV) #harmed
+NCDB_raw$P_ISEV <- gsub( 3 , 1 , NCDB_raw$P_ISEV)
+NCDB_raw$P_ISEV <- as.factor(NCDB_raw$P_ISEV)
+
+
+```
+
+
+```{r unmeaningful variables}
+#remove unmeaningful variables
+
+i_var <- c("C_YEAR" , "C_SEV" , "V_ID", "P_ID" , "C_CASE")
+NCDB_raw <- NCDB_raw[,!(names(NCDB_raw) %in% i_var)]
+
+
+```
+
+
+```{r}
+#INITIAL ANALYSIS
+
+```
+
+```{r correlation}
+#check variable correlation
+NCDB_cor <- hetcor(NCDB_raw, use = "pairwise.complete.obs")
+NCDB_cor[1]
+
+#High correlation between P_PSN & P_USER;remove P_PSN based on information gain (see next step)
+
+
+```
+
+```{r variable selection}
+#feature selection using information gain
+
+weights <- information.gain(P_ISEV ~ ., data = NCDB_raw)
+print(weights)
+
+
+NCDB_raw <- NCDB_raw[,-15]
+
+
+#select top 10 variables
+weights <- information.gain(P_ISEV ~ ., data = NCDB_raw)
+ig_var <- cutoff.k(weights, 10)
+ig_var <- c(ig_var, "P_ISEV")
+
+#subset data 
+NCDB_raw <- NCDB_raw[,(names(NCDB_raw) %in% ig_var)]
+
+
+```
+
+
+```{r NA values}
+#NA values
+#check % of complete cases
+sum(complete.cases(NCDB_raw))/nrow(NCDB_raw)
+
+
+#remove cases where dependent variable is missing
+NCDB_raw <- NCDB_raw[!(is.na(NCDB_raw$P_ISEV)),]
+
+#plot missing values per variable
+aggr_plot <- aggr(NCDB_raw, col=c('navyblue','red'), numbers=TRUE, sortVars=TRUE, labels=names(NCDB_raw), cex.axis=.7, gap=3, ylab=c("Histogram of missing data","Pattern"))
+
+
+
+
+#check % missing values per variable
+na_table <- as.table(sapply(NCDB_raw, function(x) (sum(is.na(x))*100)/nrow(NCDB_raw)))
+na_table
+```
+
+
+```{r imputation}
+
+#USE mice technique to impute missing values
+set.seed(100)
+
+
+mice_set <- mice(NCDB_raw , m = 1 , maxit = 1)
+NCDB_clean <- complete(mice_set,1)
+densityplot(mice_set)
+
+#save copy of imputed data set
+write.csv(NCDB_clean, file = "NCDB_clean.csv")
+
+
+NCDB_clean<- read.csv("NCDB_clean.csv")
+
+NCDB_clean <- NCDB_clean[-1]
+NCDB_clean <- as.data.frame(lapply(NCDB_clean, factor))
+
+
+NCDB_clean$C_VEHS <- as.integer(as.character(NCDB_clean$C_VEHS))
+NCDB_clean$V_YEAR <- (as.integer(as.character(NCDB_clean$V_YEAR)))
+NCDB_clean$P_AGE <- as.integer(NCDB_clean$P_AGE)
+
+
+
+#COMPARE ENTROPY OF IMPUTED VS COMPLETE CASE DATA SET? (meeting Jul/24th)
+
+```
+
+
+```{r statistics}
+#summary statistics and interesting Trends
+
+#numeric variables
+hist(NCDB_clean$C_VEHS, xlim = c(1,50), ylim = c(1,250000), breaks = 40,  main = "Number of Vehicles Involed", xlab = "" )
+
+summary(NCDB_clean$C_VEHS)
+
+hist(NCDB_clean$V_YEAR, breaks =50 ,    main = "Vehicle Year", xlab = "", ylim = c(1, 40000) )
+summary(NCDB_clean$V_YEAR)
+
+hist(NCDB_clean$P_AGE, xlim = c(0, 110) , breaks =50 ,    main = "Person's Age", xlab = "" )
+summary(NCDB_clean$P_AGE)
+
+#factor variables
+barplot(table(NCDB_clean$C_CONF), main = "Collision Configuration",ylim = c(1, 120000) )
+
+```
+
+
+```{r sample data}
+
+#create training/test data
+smp_size <- floor(0.70 * nrow(NCDB_clean))
+
+set.seed(123)
+trn_ind <- sample(seq_len(nrow(NCDB_clean)), size = smp_size)
+
+NCDB_train <- NCDB_clean[trn_ind, ]
+NCDB_test <- NCDB_clean[-trn_ind, ]
+```
+
+```{r logistic regression}
+####### logistic regression
+t_NCDB_lr_model <- glm(P_ISEV ~ ., family=binomial(link='logit'),data= NCDB_train)
+summary(t_NCDB_lr_model)
+
+write.csv(as.table(t_NCDB_lr_model$coefficients), file = "NCDBlogref.csv")
+
+anova(t_NCDB_lr_model , test = "Chisq")
+
+#View variance inflation factor
+vif(t_NCDB_lr_model)
+
+#test predictive power
+fitted.results <- predict(t_NCDB_lr_model,newdata= NCDB_test,type= "response")
+
+#find optimal cut off point
+opc <- InformationValue::optimalCutoff(actuals = NCDB_test$P_ISEV, predictedScores = fitted.results , optimiseFor = "misclasserror", returnDiagnostics = TRUE) 
+opc$optimalCutoff
+
+plot(opc$sensitivityTable$CUTOFF , opc$sensitivityTable$MISCLASSERROR, main = "Misclassifaction Error" , xlab = "Cutoffs" , ylab = "Missclassification" )
+
+#predict using test data
+fitted.results <- ifelse(fitted.results > opc$optimalCutoff,1,0)
+
+
+
+#ROC curves
+pr <- prediction(fitted.results, NCDB_test$P_ISEV)
+prf <- performance(pr, measure = "tpr", x.measure = "fpr")
+plot(prf, main = "Logistic Regression ROC curve")
+
+auc <- performance(pr, measure = "auc")
+auc <- auc@y.values[[1]]
+auc
+
+
+
+caret::confusionMatrix(data = as.factor(fitted.results), reference =  as.factor(NCDB_test$P_ISEV), positive = "1" , dnn = c("Prediction", "Actual"))
+
+
+```
+
+```{r Decision Tree}
+
+######## Decision Tree
+t_NCDB_dt_model <- rpart(P_ISEV ~ ., data=NCDB_train, method = "class")
+summary(t_NCDB_dt_model)
+rpart.plot(t_NCDB_dt_model, type = 5); 
+
+#check cp
+printcp(t_NCDB_dt_model)
+plotcp(t_NCDB_dt_model, main = "size of tree")
+
+
+#predict
+tree_pred = predict(t_NCDB_dt_model, NCDB_test, type="class")
+caret::confusionMatrix(tree_pred, NCDB_test$P_ISEV, positive = "1" , dnn = c("Prediction", "Actual"))
+
+#roc curve
+pr_dc <- prediction(as.numeric(tree_pred), NCDB_test$P_ISEV)
+prf_dc <- performance(pr_dc, measure = "tpr", x.measure = "fpr")
+plot(prf_dc, main = " Decision Tree ROC curve")
+
+auc1 <- performance(pr_dc, measure = "auc")
+auc1 <- auc1@y.values[[1]]
+auc1
+
+```
+```{r support vector machine}
+t_NCDB_svm_model <- svm(P_ISEV ~ . , data = NCDB_train , method = "C-classification")
+
+```
+
+
+
+```{r random forest}
+####### random forest
+
+t_NCDB_rf_model <- randomForest(P_ISEV ~ ., data=NCDB_train)
+t_NCDB_rf_model
+rf_pred = predict(t_NCDB_rf_model, NCDB_test, type="class")
+caret::confusionMatrix(rf_pred, NCDB_test$P_ISEV, positive = "1" , dnn = c("Prediction", "Actual"))
+
+```
+
+
+```{r K nearest neighbours}
+###k nearest neighbours
+
+set.seed(101)
+
+levels(NCDB_train$P_ISEV) <- make.names(levels(factor(NCDB_train$P_ISEV)))
+levels(NCDB_test$P_ISEV) <- make.names(levels(factor(NCDB_test$P_ISEV)))
+
+x = trainControl(method = "repeatedcv",
+                 number = 5,
+                 repeats = 1,
+                 classProbs = TRUE,
+                 summaryFunction = twoClassSummary)
+
+NCDB_knn_model <- train(P_ISEV ~ . , data = NCDB_train, method = "knn",
+               trControl = x,
+               metric = "ROC",
+               tuneLength = 5)
+
+# Summary of model
+NCDB_knn_model
+plot(NCDB_knn_model)
+
+# Validation
+knn_pred <- predict(NCDB_knn_model,NCDB_test, type = "prob")
+
+pred_val <-prediction(knn_pred[,2],NCDB_test$P_ISEV)
+
+# Calculating Area under Curve (AUC)
+perf_val <- performance(pred_val,"auc")
+perf_val
+
+# Plot AUC
+perf_val <- performance(pred_val, "tpr", "fpr")
+plot(perf_val, col = "green", lwd = 1.5)
+
+caret::confusionMatrix(knn_test_pred, NCDB_test$P_ISEV, positive = "1" , dnn = c("Prediction", "Actual"))
+
+
+
+
+# (optimal k = 17 based on minimizing missclasification rate via trials of k between 1 and 20)
+knn_test_pred <- knn(train = NCDB_train[, -9], test = NCDB_test[, -9], cl = NCDB_train[,9], k=17)
+caret::confusionMatrix(knn_test_pred, NCDB_test$P_ISEV, positive = "1" , dnn = c("Prediction", "Actual"))
+
+```
+
+```{r notes}
+#NOTES TO ADD TO CODE/REPORT
+# try support vector machine
+# in report use accuracy, precision f-measure ROC curves ( TPF , TNF ) for validating : information from confusion matrix
+#check brier and MCC performance measure for classifiers`
+
+
+```
+
