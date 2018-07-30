@@ -173,7 +173,7 @@ NCDB_clean$P_AGE <- as.integer(NCDB_clean$P_AGE)
 
 
 
-#COMPARE ENTROPY OF IMPUTED VS COMPLETE CASE DATA SET? (meeting Jul/24th)
+
 
 ```
 
@@ -212,7 +212,10 @@ NCDB_test <- NCDB_clean[-trn_ind, ]
 
 ```{r logistic regression}
 ####### logistic regression
+lr_start <- Sys.time()
 t_NCDB_lr_model <- glm(P_ISEV ~ ., family=binomial(link='logit'),data= NCDB_train)
+lr_end <- sys.time
+
 summary(t_NCDB_lr_model)
 
 write.csv(as.table(t_NCDB_lr_model$coefficients), file = "NCDBlogref.csv")
@@ -248,6 +251,9 @@ auc
 
 
 caret::confusionMatrix(data = as.factor(fitted.results), reference =  as.factor(NCDB_test$P_ISEV), positive = "1" , dnn = c("Prediction", "Actual"))
+
+#logistic regression run time
+lr_end - lr_start
 
 
 ```
